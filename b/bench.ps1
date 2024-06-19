@@ -15,6 +15,7 @@ else {
 $processorInfo = wmi -ClassName Win32_Processor
 $computerSystem = wmi -ClassName Win32_ComputerSystem
 $operatingSystem = wmi -ClassName Win32_OperatingSystem
+$global:tempDir = ""
 
 function Write-RedRow($title, $message) { Write-Host " $($title.PadRight(18)) : " -NoNewline; Write-Host $message -ForegroundColor Red }
 
@@ -190,23 +191,27 @@ function IoTest($filePath, $totalSize, $chunkSize) {
 
 function InstallSpeedTest() {
     $url = "https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-win64.zip"
-    $scriptFolder = Split-Path -Parent $PSCommandPath
-    $outputDirectory = Join-Path -Path $scriptFolder -ChildPath "speedtest-cli"
-    $archiveFile = Join-Path -Path $outputDirectory -ChildPath "archive.zip"
-    $speedtestExe = Join-Path -Path $outputDirectory -ChildPath "speedtest.exe"
-    if (-not (Test-Path -Path $outputDirectory)) {
-        New-Item -ItemType Directory -Path $outputDirectory | Out-Null
+    $speedtestDir = "$global:tempDir\speedtest-cli"
+    $speedtestZip = "$speedtestDir\speedtest.zip"
+    $speedtestExe = "$speedtestDir\speedtest.exe"
+    if (-not (Test-Path -Path $speedtestDir)) {
+        New-Item -ItemType Directory -Path $speedtestDir | Out-Null
     }
     if (-not (Test-Path -Path $speedtestExe)) {
         try {
-            Invoke-WebRequest -Uri $url -OutFile $archiveFile -SkipCertificateCheck
-            Expand-Archive -Path $archiveFile -DestinationPath $outputDirectory
-            Remove-Item -Path $archiveFile
+            Invoke-WebRequest -Uri $url -OutFile $speedtestZip -SkipCertificateCheck
+            Expand-Archive -Path $speedtestZip -DestinationPath $speedtestDir
+            Remove-Item -Path $speedtestZip
         }
         catch {
             Write-Host "Error: Failed to download speedtest-cli." -ForegroundColor Red
         }    
     }
+}
+
+function UninstallSpeedTest() {
+    $speedtestDir = "$global:tempDir\speedtest-cli"
+    Remove-Item -Path $speedtestDir -Recurse
 }
 
 function GetStringFromFile($filePath, $pattern) {
@@ -233,10 +238,9 @@ function GetStringFromFile($filePath, $pattern) {
 }
 
 function SpeedTest($serverId, $nodeName) {
-    $scriptFolder = Split-Path -Parent $PSCommandPath
-    $speedtestExe = Join-Path -Path $scriptFolder -ChildPath "speedtest-cli\speedtest.exe"
-    $speedtestLog = Join-Path -Path $scriptFolder -ChildPath "speedtest-cli\speedtest.log"
-    $speedtestErr = Join-Path -Path $scriptFolder -ChildPath "speedtest-cli\speedtest.err"
+    $speedtestExe = "$global:tempDir\speedtest-cli\speedtest.exe"
+    $speedtestLog = "$global:tempDir\speedtest-cli\speedtest.log"
+    $speedtestErr = "$global:tempDir\speedtest-cli\speedtest.err"
     if ($serverId) {
         Start-Process -FilePath $speedtestExe -NoNewWindow -ArgumentList "--server-id=$serverId", "--progress=no", "--accept-license", "--accept-gdpr" -Wait -RedirectStandardOutput $speedtestLog -RedirectStandardError $speedtestErr
     }
@@ -269,12 +273,25 @@ function SpeedTestAll() {
     SpeedTest "21569" "Tokyo, JP"
 }
 
+function MakeTempDir() {
+    $userProfile = $env:USERPROFILE
+    $date = Get-Date -Format 'yyyyMMdd'
+    $global:tempDir = "$userProfile\bench$date"
+    if (-not (Test-Path -Path $global:tempDir)) {
+        New-Item -ItemType Directory -Path $global:tempDir | Out-Null
+    }
+}
+
+function ClearTempDir() {
+    Remove-Item -Path $global:tempDir -Recurse
+}
+
 function PrintSeparator() { $line = ( -join (1..70 | ForEach-Object { "-" })); Write-Host $line }
 
 function PrintIntro() {
     $intro = "A Bench.ps1 Script By BanHammer"
-    $version = "v2024-06-19"
-    $usage = "irm banhammer.github.io/bench/bench.ps1 | iex"
+    $version = "v2024-06-20"
+    $usage = "irm banhammerykt.github.io/b/bench.ps1 | iex"
     $lineLength = [Math]::Round((70 - $intro.Length) / 2, 0) - 1
     $line = ( -join (1..$lineLength | ForEach-Object { "-" })); Write-Host $line -NoNewline
     Write-Host " $intro " -NoNewline
@@ -328,10 +345,9 @@ function PrintIpInfo() {
 }
 
 function PrintIoTest() {
-    $userProfile = $env:USERPROFILE
     $writemb = 2GB
-    $testFile = "$userProfile\benchtest.tmp"
-    $driveLetter = $userProfile.Substring(0, 2)
+    $testFile = "$global:tempDir\benchtest.tmp"
+    $driveLetter = $testFile.Substring(0, 2)
     $disk = wmi -Class Win32_LogicalDisk -Filter "DeviceID='$driveLetter'"
     $diskFreeSpace = $disk.FreeSpace
     if ($diskFreeSpace -lt $writemb) {
@@ -353,8 +369,10 @@ function PrintSpeedTest() {
     InstallSpeedTest
     Write-Host " Node Name".PadRight(17) "Upload Speed".PadRight(17) "Download Speed".PadRight(19) "Latency"
     SpeedTestAll
+    UninstallSpeedTest
 }
 
+MakeTempDir
 PrintIntro
 PrintSeparator
 PrintSystemInfo
@@ -364,3 +382,4 @@ PrintIoTest
 PrintSeparator
 PrintSpeedTest
 PrintSeparator
+ClearTempDir
